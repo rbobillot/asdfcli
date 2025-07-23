@@ -1,33 +1,55 @@
 #!/bin/bash
 
+# --- Logging Setup ---
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+MAGENTA='\033[0;33m'
+CYAN='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
+
+# --- Helper Functions ---
+
 _asdfcli_usage() {
-  echo 'usage:'
-  echo '  asdfcli [h | help   | -h | --help]                  # display help menu'
+  echo -e "${YELLOW}asdfcli${NC} - A friendly command-line wrapper for asdf-vm"
   echo
-  echo '  asdfcli [l | latest | -l | --latest] [plugin_name]  # install package with asdf'
-  echo '  asdfcli [u | update | -u | --update] [plugin_name]  # update package with asdf'
-  echo '  asdfcli [r | remove | -r | --remove] [plugin_name]  # remove package with asdf'
+  echo -e "${YELLOW}USAGE:${NC}"
+  echo -e "  ${GREEN}asdfcli${NC} [command] [plugin_name]"
+  echo
+  echo -e "${YELLOW}COMMANDS:${NC}"
+  echo -e "  ${GREEN}<plugin_name>${NC}                # Interactively install a version of a plugin."
+  echo -e "  ${GREEN}l, latest${NC} [plugin_name]      # Add a new plugin and install its 'latest' version."
+  echo -e "  ${GREEN}u, update${NC} [plugin_name]      # Update an existing plugin to its 'latest' version."
+  echo -e "  ${GREEN}r, remove${NC} [plugin_name]      # Remove a plugin and all its installed versions."
+  echo -e "  ${GREEN}h, help, -h, --help${NC}          # Display this help menu."
+  echo
+  echo -e "${YELLOW}NOTES:${NC}"
+  echo -e "  • If no [plugin_name] is provided for a command, an interactive selector will appear."
+  echo -e "  • Running '${GREEN}asdfcli${NC}' with no command starts the interactive installation."
+  echo
+  echo -e "${YELLOW}EXAMPLES:${NC}"
+  echo -e "  ${GREEN}asdfcli${NC}                      # Interactively find and install a new plugin"
+  echo -e "  ${GREEN}asdfcli ${MAGENTA}nodejs${NC}               # Interactively choose a version of nodejs to install"
+  echo -e "  ${GREEN}asdfcli ${CYAN}latest ${MAGENTA}python${NC}        # Install the latest version of python"
+  echo -e "  ${GREEN}asdfcli ${CYAN}update ${MAGENTA}nodejs${NC}        # Update your installed nodejs to the latest version"
 }
 
 _semver_ge() {
-  local v1_parts
-  local v2_parts
+  local v1_parts v2_parts
   IFS='.' read -ra v1_parts <<<"$1"
   IFS='.' read -ra v2_parts <<<"$2"
 
-  local i
-  local max_len="${#v1_parts[@]}"
-
-  if (("${#v2_parts[@]}" > max_len)); then
-    max_len="${#v2_parts[@]}"
-  fi
+  local i max_len="${#v1_parts[@]}"
+  ((${#v2_parts[@]} > max_len)) && max_len="${#v2_parts[@]}"
 
   for ((i = 0; i < max_len; i++)); do
-    local v1_segment_str="${v1_parts[i]:-0}"
-    local v2_segment_str="${v2_parts[i]:-0}"
-
-    printf -v v1_segment_dec "%d" "$v1_segment_str"
-    printf -v v2_segment_dec "%d" "$v2_segment_str"
+    local v1_segment_dec v2_segment_dec
+    printf -v v1_segment_dec "%d" "${v1_parts[i]:-0}"
+    printf -v v2_segment_dec "%d" "${v2_parts[i]:-0}"
 
     if ((v1_segment_dec > v2_segment_dec)); then
       return 0
@@ -35,43 +57,38 @@ _semver_ge() {
       return 1
     fi
   done
-
   return 0
 }
 
 # Returns 1 if VERSION < 0.16.0
-#
-# As some commands change name/behaviour from 0.16.0 (global->set, list...)
-# this function is necessary to handle asdfcli across multiple asdf versions
 _asdfcli_check_asdf_version() {
-  local asdf_version_output
-  local parsed_version
+  local asdf_version_output parsed_version
   local required_version="0.16.0"
 
   asdf_version_output=$(asdf --version 2>&1 || true)
 
   if [[ "$asdf_version_output" =~ ^v([0-9]+\.[0-9]+\.[0-9]+.*)$ ]]; then
-    parsed_version="${BASH_REMATCH[1]}"
-    parsed_version="${parsed_version%%-*}"
+    parsed_version="${BASH_REMATCH[1]%%-*}"
   elif [[ "$asdf_version_output" =~ ^asdf\ version\ v?([0-9]+\.[0-9]+\.[0-9]+.*)$ ]]; then
-    parsed_version="${BASH_REMATCH[1]}"
-    parsed_version="${parsed_version%%-*}"
+    parsed_version="${BASH_REMATCH[1]%%-*}"
   else
-    echo "Error: Could not parse asdf version output: '$asdf_version_output'" >&2
+    log_error "Could not parse asdf version from output: '$asdf_version_output'"
     return 1
   fi
 
   if [[ -z "$parsed_version" ]]; then
-    echo "Error: Parsed an empty asdf version string." >&2
+    log_error "Parsed an empty asdf version string."
     return 1
   fi
 
-  return $(_semver_ge "$parsed_version" "$required_version")
+  _semver_ge "$parsed_version" "$required_version"
 }
 
 _asdfcli_select_plugin() {
   asdf plugin list all | sed '1!G;h;$!d' | fzf | awk '{print $1}'
 }
+
+# --- Core Logic Functions ---
 
 _asdfcli_install_plugin() {
   local ASDF_PLUGIN=$1
@@ -80,11 +97,11 @@ _asdfcli_install_plugin() {
 
   _asdfcli_check_asdf_version || SET_GLOBAL="global"
 
-  if asdf install $ASDF_PLUGIN $SHIM_VERSION && asdf $SET_GLOBAL $ASDF_PLUGIN $SHIM_VERSION; then
-    echo -e "${OK_SIGN} Successfully installed '$ASDF_PLUGIN $SHIM_VERSION'."
+  if asdf install "$ASDF_PLUGIN" "$SHIM_VERSION" && asdf "$SET_GLOBAL" "$ASDF_PLUGIN" "$SHIM_VERSION"; then
+    log_info "Successfully installed and set '${YELLOW}$ASDF_PLUGIN $SHIM_VERSION${NC}'."
     return 0
   else
-    echo -e "${KO_SIGN} Failed to install '$ASDF_PLUGIN'." >&2
+    log_error "Failed to install '${YELLOW}$ASDF_PLUGIN $SHIM_VERSION${NC}'."
     return 1
   fi
 }
@@ -93,47 +110,43 @@ _asdfcli_remove_plugin() {
   local ASDF_PLUGIN="$1"
 
   if [[ -z "$ASDF_PLUGIN" ]]; then
-    echo "No plugin specified. Please select one to remove:"
+    log_info "No plugin specified. Please select one to remove:"
     ASDF_PLUGIN=$(asdf plugin list | sed '1!G;h;$!d' | fzf --exit-0)
     if [[ -z "$ASDF_PLUGIN" ]]; then
-      echo "No plugin selected. Aborting removal." >&2
+      log_warn "No plugin selected. Aborting removal."
       return 1
     fi
   fi
 
-  echo "Removing '$ASDF_PLUGIN' plugin..."
+  log_info "Removing '${YELLOW}$ASDF_PLUGIN${NC}' plugin..."
   if asdf plugin remove "$ASDF_PLUGIN"; then
-    echo "Plugin '$ASDF_PLUGIN' removed successfully."
+    log_info "Plugin '${YELLOW}$ASDF_PLUGIN${NC}' removed successfully."
     return 0
   else
-    echo "Error: Failed to remove '$ASDF_PLUGIN' plugin." >&2
+    log_error "Failed to remove '${YELLOW}$ASDF_PLUGIN${NC}' plugin."
     return 1
   fi
 }
 
 _asdfcli_update_plugin() {
-  local OK_SIGN="\033[92m\xE2\x9c\x93\033[0m"
-  local KO_SIGN="\033[91m\xE2\x9C\x97\033[0m"
   local ASDF_PLUGIN="$1"
 
   if [[ -z "$ASDF_PLUGIN" ]]; then
-    echo "Please select a plugin to update:"
+    log_info "Please select a plugin to update:"
     ASDF_PLUGIN=$(asdf plugin list | sed '1!G;h;$!d' | fzf --exit-0)
   fi
 
   if [[ -z "$ASDF_PLUGIN" ]]; then
-    echo "No plugin selected. Aborting update." >&2
+    log_warn "No plugin selected. Aborting update."
     return 1
   fi
 
-  local SHIM_VERSION="latest"
-
-  echo -e "Attempting to update '\033[93m$ASDF_PLUGIN\033[0m' to '$SHIM_VERSION'..."
-  if _asdfcli_install_plugin "$ASDF_PLUGIN" "$SHIM_VERSION"; then
-    echo -e "${OK_SIGN} Successfully updated '$ASDF_PLUGIN'."
+  log_info "Attempting to update '${YELLOW}$ASDF_PLUGIN${NC}' to latest version..."
+  if _asdfcli_install_plugin "$ASDF_PLUGIN" "latest"; then
+    log_info "Successfully updated '${YELLOW}$ASDF_PLUGIN${NC}'."
     return 0
   else
-    echo -e "${KO_SIGN} Failed to update '$ASDF_PLUGIN'." >&2
+    log_error "Failed to update '${YELLOW}$ASDF_PLUGIN${NC}'."
     return 1
   fi
 }
@@ -141,64 +154,64 @@ _asdfcli_update_plugin() {
 _asdfcli_add_and_install_plugin() {
   local ASDF_PLUGIN=$1
   local SHIM_VERSION=$2
-  local OK_SIGN="\033[92m\xE2\x9c\x93\033[0m"
 
   [[ -z $ASDF_PLUGIN ]] && ASDF_PLUGIN=$(_asdfcli_select_plugin)
+  [[ -z $ASDF_PLUGIN ]] && {
+    log_warn "No plugin selected. Aborting."
+    return 1
+  }
 
-  echo -e "Adding '\033[93m$ASDF_PLUGIN\033[0m' plugin..."
+  log_info "Adding '${YELLOW}$ASDF_PLUGIN${NC}' plugin repository..."
 
-  if [[ -n $SHIM_VERSION ]]; then
-    asdf plugin add $ASDF_PLUGIN &&
-      _asdfcli_install_plugin $ASDF_PLUGIN $SHIM_VERSION
+  if asdf plugin add "$ASDF_PLUGIN"; then
+    log_info "Plugin repo added. Now installing..."
   else
-    asdf plugin add $ASDF_PLUGIN &&
-      echo -e $OK_SIGN &&
-      SHIM_VERSION=$(asdf list all $ASDF_PLUGIN | sed '1!G;h;$!d' | fzf) &&
-      _asdfcli_install_plugin $ASDF_PLUGIN $SHIM_VERSION
+    log_error "Failed to add plugin repository for '${YELLOW}$ASDF_PLUGIN${NC}'."
+    return 1
   fi
 
-  # Remove plugin if not installed
-  if [[ -z $SHIM_VERSION ]]; then
-    if _asdfcli_check_asdf_version; then
-      asdf list $ASDF_PLUGIN &>/dev/null || _asdfcli_remove_plugin $ASDF_PLUGIN
-    else
-      [[ $(asdf list zola 2>&1 >/dev/null) =~ "No versions installed" ]] &&
-        _asdfcli_remove_plugin $ASDF_PLUGIN
-    fi
+  if [[ -z "$SHIM_VERSION" ]]; then
+    log_info "Please select a version of '${YELLOW}$ASDF_PLUGIN${NC}' to install:"
+    SHIM_VERSION=$(asdf list all "$ASDF_PLUGIN" | sed '1!G;h;$!d' | fzf --exit-0)
+  fi
+
+  if [[ -n "$SHIM_VERSION" ]]; then
+    _asdfcli_install_plugin "$ASDF_PLUGIN" "$SHIM_VERSION"
+  else
+    log_warn "No version selected for '${YELLOW}$ASDF_PLUGIN${NC}'. Cleaning up added plugin."
+    # Auto-remove the plugin if no version was installed
+    _asdfcli_remove_plugin "$ASDF_PLUGIN" >/dev/null
   fi
 }
 
-_check_requested_bins() {
-  local REQUESTED_BINS=("asdf" "fzf" "sed" "awk")
-  local MISSING_BIN=0
-
-  for bin in ${REQUESTED_BINS[*]}; do
+_check_dependencies() {
+  local -a MISSING_BINS=()
+  for bin in "asdf" "fzf" "sed" "awk"; do
     if ! command -v "$bin" &>/dev/null; then
-      MISSING_BIN=$(($MISSING_BIN + 1))
-      [[ $MISSING_BIN -eq 1 ]] && echo "Please install missing binaries:"
-      [[ $MISSING_BIN -ne 0 ]] && echo " - $bin"
+      MISSING_BINS+=("$bin")
     fi
   done
 
-  return $MISSING_BIN
+  if ((${#MISSING_BINS[@]} > 0)); then
+    log_error "Missing required command(s): ${YELLOW}${MISSING_BINS[*]}${NC}"
+    log_error "Please install them to continue."
+    return 1
+  fi
+  return 0
 }
+
+# --- Main Function ---
 
 asdfcli() {
   local OPT="$1"
   local ASDF_PLUGIN="$2"
 
-  _check_requested_bins || return 1
+  _check_dependencies || return 1
 
   case "$OPT" in
   "")
-    echo "No command specified. Selecting a plugin to add/install..."
-    ASDF_PLUGIN=$(_asdfcli_select_plugin)
-    if [[ -n "$ASDF_PLUGIN" ]]; then
-      _asdfcli_add_and_install_plugin "$ASDF_PLUGIN"
-    else
-      echo "No plugin selected. Exiting." >&2
-      return 1
-    fi
+    log_info "No command specified. Starting interactive install..."
+    _asdfcli_add_and_install_plugin
     ;;
   h | help | -h | --help)
     _asdfcli_usage
@@ -218,3 +231,8 @@ asdfcli() {
     ;;
   esac
 }
+
+# If the script is executed directly, call the main function
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  asdfcli "$@"
+fi
