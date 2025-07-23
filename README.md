@@ -22,3 +22,18 @@ source <(curl -s https://raw.githubusercontent.com/rbobillot/asdfcli/refs/heads/
 ### Demo
 
 ![preview](./misc/asdfcli_demo.gif)
+
+### 🚀 Install
+
+To install `asdfcli.bash` and automatically configure your shell,
+run the following command in your terminal:
+
+```bash
+curl -sL https://raw.githubusercontent.com/rbobillot/asdfcli/refs/heads/main/install.bash | bash
+```
+
+### Uninstall
+
+```bash
+curl -sL https://raw.githubusercontent.com/rbobillot/asdfcli/refs/heads/main/install.bash | bash -s -- --uninstall
+```
