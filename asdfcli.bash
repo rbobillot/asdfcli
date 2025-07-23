@@ -80,8 +80,13 @@ _asdfcli_install_plugin() {
 
   _asdfcli_check_asdf_version || SET_GLOBAL="global"
 
-  asdf install $ASDF_PLUGIN $SHIM_VERSION &&
-    asdf $SET_GLOBAL $ASDF_PLUGIN $SHIM_VERSION
+  if asdf install $ASDF_PLUGIN $SHIM_VERSION && asdf $SET_GLOBAL $ASDF_PLUGIN $SHIM_VERSION; then
+    echo -e "${OK_SIGN} Successfully installed '$ASDF_PLUGIN $SHIM_VERSION'."
+    return 0
+  else
+    echo -e "${KO_SIGN} Failed to install '$ASDF_PLUGIN'." >&2
+    return 1
+  fi
 }
 
 _asdfcli_remove_plugin() {
@@ -109,10 +114,12 @@ _asdfcli_remove_plugin() {
 _asdfcli_update_plugin() {
   local OK_SIGN="\033[92m\xE2\x9c\x93\033[0m"
   local KO_SIGN="\033[91m\xE2\x9C\x97\033[0m"
-  local ASDF_PLUGIN
+  local ASDF_PLUGIN="$1"
 
-  echo "Please select a plugin to update:"
-  ASDF_PLUGIN=$(asdf plugin list | sed '1!G;h;$!d' | fzf --exit-0)
+  if [[ -z "$ASDF_PLUGIN" ]]; then
+    echo "Please select a plugin to update:"
+    ASDF_PLUGIN=$(asdf plugin list | sed '1!G;h;$!d' | fzf --exit-0)
+  fi
 
   if [[ -z "$ASDF_PLUGIN" ]]; then
     echo "No plugin selected. Aborting update." >&2
